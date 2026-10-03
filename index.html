@@ -27,7 +27,17 @@ button,input,select{font:inherit;color:inherit}
 .brand h1{margin:0;font-size:16px;font-weight:700;letter-spacing:.04em;white-space:nowrap}
 .brand .sub{color:var(--dim);font-size:12px}
 .top .grow{flex:1}
-.hint{color:var(--faint);font-size:11.5px}
+.tissue{flex:1;min-width:0;display:flex;align-items:baseline;gap:6px 12px;flex-wrap:wrap;padding:2px 12px;border-left:3px solid var(--accent);background:var(--panel-2);border-radius:0 4px 4px 0;min-height:36px;align-content:center}
+.tissue .sw{width:12px;height:12px;align-self:center;border-radius:3px;background:#555}
+.tissue strong{font-size:18px;font-weight:700;color:#fff;line-height:1.3}
+.t-en{color:var(--dim);font-size:12px}
+.t-vals{font-family:var(--mono);font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums;margin-left:auto;display:flex;gap:4px 12px;flex-wrap:wrap}
+.t-vals b{font-weight:400;color:var(--fg)}
+.t-vals .cur{color:var(--accent)}
+#tip{position:fixed;z-index:60;pointer-events:none;background:#06090dee;border:1px solid var(--line-2);border-radius:5px;padding:4px 9px;font-size:13px;line-height:1.4;max-width:260px;box-shadow:0 2px 10px #0008}
+#tip[hidden]{display:none}
+#tip b{color:#fff;font-weight:700}
+#tip small{display:block;color:var(--dim);font-size:11px;font-family:var(--mono)}
 .stage{flex:1;min-height:0;display:flex;gap:0}
 .views{flex:1;min-width:0;min-height:0;display:grid;gap:6px;padding:8px;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;grid-template-areas:"ax co" "sa td"}
 .views.cmp{grid-template-areas:"d a" "d b"}
@@ -116,7 +126,13 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--panel-2);border:1px 
   body{overflow:visible}
   #app{height:auto;min-height:100%}
   .top{position:sticky;top:env(safe-area-inset-top,0px);z-index:30}
-  .hint{display:none}
+  .tissue{order:3;flex-basis:100%;padding:2px 10px}
+  .tissue strong{font-size:16px}
+  .t-en{display:none}
+  .t-vals{margin-left:auto}
+  .t-vals span:not(.cur){display:none}
+  .brand .sub{display:none}
+  .top{gap:8px 12px;padding:6px 16px}
   .mtoggle{display:inline-block;margin-left:auto}
   .p-body canvas{touch-action:pan-y}
   body:not(.touchop) #gl-host canvas{touch-action:pan-y!important}
@@ -134,9 +150,8 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--panel-2);border:1px 
 <div id="app">
   <header class="top">
     <div class="brand"><h1>脳断面ビューア</h1><span class="sub">CT・MRIの断面と3D脳をつなげて見る</span></div>
-    <span class="grow"></span>
+    <div class="tissue" id="tissue" aria-live="polite"><i class="sw" id="t-sw"></i><strong id="t-name">断面にカーソルを合わせてください</strong><span class="t-en" id="t-en"></span><span class="t-vals" id="t-vals"></span></div>
     <button class="btn mtoggle" id="btn-touchop" type="button" aria-pressed="false">画像を指で操作: オフ</button>
-    <span class="hint">断面をクリックで位置移動 / ホイールでスライス / 右ドラッグで明るさ・コントラスト / 見出しをダブルクリックで拡大</span>
   </header>
   <div class="stage">
     <section class="views" id="views" aria-label="画像表示"></section>
@@ -206,6 +221,7 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--panel-2);border:1px 
     </aside>
   </div>
 </div>
+<div id="tip" hidden></div>
 <div id="loading" hidden><div id="loading-text">読み込み中…</div><div class="bar"><i></i></div></div>
 <div id="drop" hidden>NIfTIファイルをここにドロップ</div>
 
@@ -923,7 +939,7 @@ function makePanel(key, plane, slot){
     e.preventDefault();
   });
   cv.addEventListener('pointermove', e => {
-    if (p.drag === 'cursor') cursorFromEvent(p, e);
+    if (p.drag === 'cursor') { cursorFromEvent(p, e); showTip(p, e, pointToVoxel(p, e)); }
     else if (p.drag === 'wl') {
       const m = DS.mods[p.mod], dx = e.clientX - p.lx, dy = e.clientY - p.ly;
       p.lx = e.clientX; p.ly = e.clientY;
@@ -938,7 +954,7 @@ function makePanel(key, plane, slot){
     p.tap = null; end();
   });
   cv.addEventListener('pointercancel', () => { p.tap = null; end(); });
-  cv.addEventListener('pointerleave', () => { if (!p.drag) { st.hover = null; dirty.probe = true; dirty.slices = true; } });
+  cv.addEventListener('pointerleave', () => { $('#tip').hidden = true; if (!p.drag) { st.hover = null; dirty.probe = true; dirty.slices = true; } });
   cv.addEventListener('wheel', e => { e.preventDefault(); stepSlice(plane, (e.deltaY < 0 ? 1 : -1) * (e.shiftKey ? 5 : 1)); }, {passive: false});
   cv.addEventListener('contextmenu', e => e.preventDefault());
   cv.tabIndex = 0;
@@ -969,6 +985,7 @@ function cursorFromEvent(p, e){ const c = pointToVoxel(p, e); if (c) { setCursor
 function hoverFromEvent(p, e){
   const c = pointToVoxel(p, e);
   if (c && (!st.hover || st.hover.i !== c.i || st.hover.j !== c.j || st.hover.k !== c.k)) { st.hover = c; dirty.probe = true; if (st.highlight) dirty.slices = true; }
+  showTip(p, e, c);
 }
 /* structure under the pointer (or the cursor after a touch tap) for the highlight */
 function hlKey(){
@@ -1404,31 +1421,58 @@ function updateLegend(){
   if (show) lg.innerHTML = LOBE.slice(1).map(l => `<span><i class="sw" style="background:${l.c}"></i>${l.jp}</span>`).join('') + '<span><i class="sw" style="background:#4aa3ff"></i>脳脊髄液</span>' + VSUB.slice(1).map(v => `<span><i class="sw" style="background:${v.c}"></i>${v.jp}</span>`).join('');
 }
 
+/* name / description of the tissue at a voxel */
+function describe(c){
+  const ds = DS, n = c.i + ds.nx * (c.j + ds.ny * c.k);
+  const r = {n, has: false, jp: '', en: '', note: '', lab: -1, color: '#566a7f'};
+  if (!ds.labels) return r;
+  const lab = ds.labels[n], l = LAB[lab];
+  if (!l) return r;
+  r.has = true; r.lab = lab;
+  let jp = l.jp, en = l.en, note = l.note;
+  const lb = ds.lobes ? ds.lobes[n] : 0, vs = ds.vsub ? ds.vsub[n] : 0;
+  const sd = sideOfVoxel(ds, lab, lab === 7 ? vs : 0, c.i), sj = sd > 0 ? '左' : sd < 0 ? '右' : '', se = sd > 0 ? 'Left ' : sd < 0 ? 'Right ' : '';
+  const lc = t => t.charAt(0).toLowerCase() + t.slice(1);
+  r.color = OVC[lab] || '#8da0b4';
+  if (lab === 7 && vs) {
+    const v = VSUB[vs];
+    jp = vs <= 5 ? `${sj}側脳室 ${v.jp}` : v.jp; en = vs <= 5 ? `${se}lateral ventricle, ${lc(v.en)}` : v.en; note = v.note + '<br>脳脊髄液で満たされた腔。CTでは黒く、T2では白く、FLAIRでは黒く見えます。';
+    r.color = v.c;
+  } else if (lb && (lab === 5 || lab === 6)) {
+    jp = sj + LOBE[lb].jp + (lab === 5 ? 'の皮質' : 'の白質'); en = se + lc(LOBE[lb].en) + (lab === 5 ? ' cortex' : ' white matter'); r.color = LOBE[lb].c;
+  } else if (sj) { jp = sj + jp; en = se + lc(en); }
+  r.jp = jp; r.en = en; r.note = note;
+  return r;
+}
+const valText = (m, n) => m.kind === 'ct' ? fmt(m.data[n]) + ' HU' : fmt(m.data[n]);
 function updateProbe(){
-  const ds = DS, c = st.hover || {i: st.i, j: st.j, k: st.k}, n = c.i + ds.nx * (c.j + ds.ny * c.k);
+  const ds = DS, c = st.hover || {i: st.i, j: st.j, k: st.k}, d = describe(c), n = d.n;
   const cd = ds.coord(c.i, c.j, c.k), side = (v, a, b) => (v >= 0 ? a : b) + ' ' + fmt(Math.abs(v), 1);
-  let html = '';
-  const l = ds.labels ? LAB[ds.labels[n]] : null;
-  let note = l ? l.note : '';
-  if (l) {
-    const lab = ds.labels[n];
-    let jp = l.jp, en = l.en, extra = '';
-    const lb = ds.lobes ? ds.lobes[n] : 0, vs = ds.vsub ? ds.vsub[n] : 0;
-    const sd = sideOfVoxel(ds, lab, lab === 7 ? vs : 0, c.i), sj = sd > 0 ? '左' : sd < 0 ? '右' : '', se = sd > 0 ? 'Left ' : sd < 0 ? 'Right ' : '';
-    if (lab === 7 && vs) {
-      const v = VSUB[vs];
-      jp = vs <= 5 ? `${sj}側脳室 ${v.jp}` : v.jp; en = vs <= 5 ? `${se}lateral ventricle, ${v.en.toLowerCase()}` : v.en; note = v.note;
-      extra = '<br>脳脊髄液で満たされた腔。CTでは黒く、T2では白く、FLAIRでは黒く見えます。';
-    } else if (lb && (lab === 5 || lab === 6)) { jp = sj + LOBE[lb].jp + (lab === 5 ? 'の皮質' : 'の白質'); en = se + LOBE[lb].en.toLowerCase() + (lab === 5 ? ' cortex' : ' white matter'); }
-    else if (sj) { jp = sj + jp; en = se + en.charAt(0).toLowerCase() + en.slice(1); }
-    html += `<div class="name">${jp}</div><div class="en">${en}</div>`;
-    note += extra;
-  } else html += `<div class="name">${st.hover ? 'ポインタの位置' : '選択位置'}</div><div class="en">構造ラベルなし</div>`;
+  /* always-visible bar in the header */
+  $('#t-name').textContent = d.has ? d.jp : (ds.labels ? '—' : st.hover ? 'ポインタの位置' : '選択位置');
+  $('#t-en').textContent = d.has ? d.en : '';
+  $('#t-sw').style.background = d.has ? d.color : '#566a7f';
+  $('#t-vals').innerHTML = ds.mods.map((m, i) => `<span class="${i === st.modA ? 'cur' : ''}">${m.name.replace(/\(.*\)/, '')} <b>${valText(m, n)}</b></span>`).join('');
+  /* detail card in the side column */
+  let html = d.has ? `<div class="name">${d.jp}</div><div class="en">${d.en}</div>` : `<div class="name">${st.hover ? 'ポインタの位置' : '選択位置'}</div><div class="en">構造ラベルなし</div>`;
   html += `<div class="pos">${ds.phantom ? `${side(cd.x, '左', '右')} / ${side(cd.y, '前', '後')} / ${side(cd.z, '上', '下')} mm` : `ボクセル (${c.i}, ${c.j}, ${c.k})`}</div>`;
-  html += '<table>' + ds.mods.map((m, i) => `<tr class="${i === st.modA ? 'cur' : ''}"><td>${m.name}</td><td>${m.kind === 'ct' ? fmt(m.data[n]) + ' HU' : fmt(m.data[n]) + (ds.phantom ? '' : '')}</td></tr>`).join('') + '</table>';
-  if (l) html += `<p class="desc">${note}</p>`;
-  else if (ds.mods.length) html += `<p class="desc">MRIの数値は画像ごとの相対値です。CTはHU(ハウンスフィールド値)です。</p>`;
+  html += '<table>' + ds.mods.map((m, i) => `<tr class="${i === st.modA ? 'cur' : ''}"><td>${m.name}</td><td>${valText(m, n)}</td></tr>`).join('') + '</table>';
+  html += d.has ? `<p class="desc">${d.note}</p>` : `<p class="desc">MRIの数値は画像ごとの相対値です。CTはHU(ハウンスフィールド値)です。</p>`;
   $('#probe').innerHTML = html;
+}
+/* floating label that follows the mouse over a slice */
+function showTip(p, e, c){
+  const tip = $('#tip');
+  if (e.pointerType === 'touch' || !c) { tip.hidden = true; return; }
+  const d = describe(c), m = DS.mods[p.mod];
+  if (!d.has && !DS.labels) { tip.innerHTML = `<small>${m.name} ${valText(m, d.n)}</small>`; }
+  else tip.innerHTML = `<b>${d.has ? d.jp : '—'}</b><small>${m.name.replace(/\(.*\)/, '')} ${valText(m, d.n)}</small>`;
+  tip.hidden = false;
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = e.clientX + 16, y = e.clientY + 18;
+  if (x + w > innerWidth - 6) x = e.clientX - w - 12;
+  if (y + h > innerHeight - 6) y = e.clientY - h - 12;
+  tip.style.left = Math.max(4, x) + 'px'; tip.style.top = Math.max(4, y) + 'px';
 }
 function updateInfo(){
   const ds = DS;
